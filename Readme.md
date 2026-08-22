@@ -32,39 +32,39 @@ Access Module-Wise via CLI or interactive Streamlit chat—your choice, same int
 ## Production Architecture (Target Design)
 
 ```
-┌─────────────────────────────────────────────────────────────┐
+┌──────────────────────────────────────────────────────────────┐
 │  PRODUCTION ARCHITECTURE (target design, not fully built)    │
-└─────────────────────────────────────────────────────────────┘
+└──────────────────────────────────────────────────────────────┘
 
   [GitHub: infra-modules repo]     [GitHub: service-* repos]
          │  push to main                  │  push to main
          ▼                                 ▼
-   ┌─────────────────────────────────────────────┐
+   ┌───────────────────────────────────────────────┐
    │  GitHub webhook (on push) → triggers ingestion│
-   └─────────────────────────────────────────────┘
+   └───────────────────────────────────────────────┘
                         │
                         ▼
-   ┌─────────────────────────────────────────────┐
-   │  Ingestion job (e.g. GitHub Action, Lambda,   │
-   │  or Airflow DAG)   │
-   │  1. git pull affected repo                    │
+   ┌────────────────────────────────────────────────┐
+   │  Ingestion job (e.g. GitHub Action, Lambda,    │
+   │  or Airflow DAG)                               │
+   │  1. git pull affected repo                     │
    │  2. python-hcl2 parse → structured facts       │
    │  3. LLMGraphTransformer → relationship extract │
    │  4. write nodes/edges into Neo4j AuraDB        │
    │  5. re-embed changed READMEs into vector store │
-   └─────────────────────────────────────────────┘
+   └────────────────────────────────────────────────┘
                         │
                         ▼
-   ┌─────────────────────────────────────────────┐
+   ┌────────────────────────────────────────────────┐
    │  Neo4j AuraDB (graph)  +  Vector store         │
    │  — always reflects latest repo state           │
-   └─────────────────────────────────────────────┘
+   └────────────────────────────────────────────────┘
                         │
                         ▼
-   ┌─────────────────────────────────────────────┐
+   ┌────────────────────────────────────────────────┐
    │  Serving layer: Streamlit / API / Slack bot    │
-   │  — only ever reads, never rebuilds inline       │
-   └─────────────────────────────────────────────┘
+   │  — only ever reads, never rebuilds inline      │
+   └────────────────────────────────────────────────┘
 ```
 
 **Key principle**: On-demand indexing decouples ingestion from serving. New code deploys don't rebuild the graph—repo changes trigger ingestion webhooks instead. Serving layer remains lightweight and responsive.

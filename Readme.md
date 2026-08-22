@@ -46,7 +46,7 @@ Access Module-Wise via CLI or interactive Streamlit chat—your choice, same int
                         ▼
    ┌─────────────────────────────────────────────┐
    │  Ingestion job (e.g. GitHub Action, Lambda,   │
-   │  or Airflow DAG — you already know Airflow)   │
+   │  or Airflow DAG)   │
    │  1. git pull affected repo                    │
    │  2. python-hcl2 parse → structured facts       │
    │  3. LLMGraphTransformer → relationship extract │

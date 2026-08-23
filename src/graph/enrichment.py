@@ -5,10 +5,9 @@ LLM-enriched graph analysis:
            structural sub-check: comment claim vs parsed HCL facts (code-grounded)
            narrative sub-check: README vs internal doc vs comment (surfaced, no verdict)
 """
-import json
 from pathlib import Path
 
-from src.llm.nebius_client import get_llm
+from src.llm.nebius_client import get_llm, invoke_json
 from src.parsing.terraform.comment_extractor import extract_comments_for_module
 
 MODULES_DIR = Path("data/github-repos/infra-modules/modules")
@@ -46,13 +45,11 @@ def check_duplicate_capability(module_a: str, module_b: str, resources_a: list[s
         name_a=module_a, desc_a=read_readme(module_a)[:500], resources_a=resources_a,
         name_b=module_b, desc_b=read_readme(module_b)[:500], resources_b=resources_b,
     )
-    response = llm.invoke(prompt)
+    result = invoke_json(llm, prompt)
+    if "_error" in result:
+        return {"similar": None, "confidence": "low", "reasoning": result["_error"]}
+    return result
 
-
-    try:
-        return json.loads(response.content)
-    except json.JSONDecodeError:
-        return {"similar": None, "confidence": "low", "reasoning": f"parse error: {response.content[:200]}"}
 
 # --- 4.1b: Documentation drift detection ---
 
@@ -69,12 +66,11 @@ If no checkable claims, return {{"claims": []}}.
 
 
 def extract_structural_claims(comment: str) -> list[dict]:
-    llm = get_llm()
-    response = llm.invoke(STRUCTURAL_CLAIM_PROMPT.format(comment=comment))
-    try:
-        return json.loads(response.content).get("claims", [])
-    except json.JSONDecodeError:
+    llm = get_llm(max_tokens=1024, frequency_penalty=0.4)
+    result = invoke_json(llm, STRUCTURAL_CLAIM_PROMPT.format(comment=comment))
+    if "_error" in result:
         return []
+    return result.get("claims", [])
 
 
 def check_structural_drift(module_name: str, resource_types: list[str]) -> list[dict]:
@@ -124,30 +120,11 @@ Internal doc: {internal_doc}
 
 Inline comment: {comment}
 
-Respond ONLY with valid JSON, no other text:
-{{"consistent": true/false, "summary": "one sentence describing alignment or divergence"}}
+Respond ONLY with valid JSON, no other text. The "summary" field must be
+ONE sentence, maximum 25 words:
+{{"consistent": true/false, "summary": "one short sentence, max 25 words"}}
 """
 
-
-# def check_narrative_alignment(module_name: str, internal_doc_text: str = "") -> dict:
-#     readme = read_readme(module_name)
-#     comments = extract_comments_for_module(MODULES_DIR / module_name)
-#     comment_text = " ".join(comments) if comments else "(none)"
-#
-#     if not readme and not internal_doc_text and not comments:
-#         return {"consistent": None, "summary": "no sources available to compare"}
-#
-#     llm = get_llm()
-#     prompt = NARRATIVE_COMPARE_PROMPT.format(
-#         readme=readme[:800] or "(none)",
-#         internal_doc=internal_doc_text[:800] or "(none)",
-#         comment=comment_text[:500],
-#     )
-#     response = llm.invoke(prompt)
-#     try:
-#         return json.loads(response.content)
-#     except json.JSONDecodeError:
-#         return {"consistent": None, "summary": f"parse error: {response.content[:200]}"}
 
 def check_narrative_alignment(module_name: str, internal_doc_text: str = "") -> dict:
     readme = read_readme(module_name)
@@ -157,15 +134,13 @@ def check_narrative_alignment(module_name: str, internal_doc_text: str = "") -> 
     if not readme and not internal_doc_text and not comments:
         return {"consistent": None, "summary": "no sources available to compare"}
 
-    llm = get_llm()
+    llm = get_llm(max_tokens=1024, frequency_penalty=0.4)
     prompt = NARRATIVE_COMPARE_PROMPT.format(
         readme=readme[:800] or "(none)",
         internal_doc=internal_doc_text[:800] or "(none)",
         comment=comment_text[:500],
     )
-    response = llm.invoke(prompt)
-
-    try:
-        return json.loads(response.content)
-    except json.JSONDecodeError:
-        return {"consistent": None, "summary": f"parse error: {response.content[:200]}"}
+    result = invoke_json(llm, prompt)
+    if "_error" in result:
+        return {"consistent": None, "summary": result["_error"]}
+    return result

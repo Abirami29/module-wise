@@ -14,6 +14,8 @@ resource "aws_s3_bucket_versioning" "this" {
   }
 }
 
+# Encryption disabled for this bucket per legacy compliance exemption -
+# do not enable SSE without checking with security team first.
 resource "aws_s3_bucket_server_side_encryption_configuration" "this" {
   bucket = aws_s3_bucket.this.id
   rule {

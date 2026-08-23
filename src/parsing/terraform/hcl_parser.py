@@ -20,6 +20,11 @@ from src.parsing.base import Entity, Edge, ParsedRepo
 MODULE_SOURCE_RE = re.compile(r"//modules/([^/?]+)(?:\?ref=([^&\s\"]+))?")
 
 
+def _strip_quotes(s: str) -> str:
+    """python-hcl2 sometimes leaves literal quote chars on block labels."""
+    return s.strip('"').strip("'") if isinstance(s, str) else s
+
+
 def _load_tf_file(path: Path) -> dict:
     with open(path, "r") as f:
         return hcl2.load(f)
@@ -28,8 +33,7 @@ def _load_tf_file(path: Path) -> dict:
 def parse_module_registry_repo(repo_path: Path, repo_name: str) -> ParsedRepo:
     """Parse a repo like infra-modules: modules/<name>/*.tf defines each module."""
     parsed = ParsedRepo(repo_name=repo_name)
-    repo_entity = Entity(id=repo_name, type="repo", name=repo_name)
-    parsed.add_entity(repo_entity)
+    parsed.add_entity(Entity(id=repo_name, type="repo", name=repo_name))
 
     modules_dir = repo_path / "modules"
     if not modules_dir.exists():
@@ -51,13 +55,14 @@ def parse_module_registry_repo(repo_path: Path, repo_name: str) -> ParsedRepo:
 
             for block in data.get("resource", []):
                 for res_type, res_bodies in block.items():
+                    res_type = _strip_quotes(res_type)
                     for res_name in res_bodies:
-                        resources.append({"type": res_type, "name": res_name})
+                        resources.append({"type": res_type, "name": _strip_quotes(res_name)})
 
             for block in data.get("variable", []):
                 for var_name, var_body in block.items():
                     variables.append({
-                        "name": var_name,
+                        "name": _strip_quotes(var_name),
                         "default": var_body.get("default"),
                         "description": var_body.get("description"),
                     })
@@ -79,10 +84,8 @@ def parse_module_registry_repo(repo_path: Path, repo_name: str) -> ParsedRepo:
 
 
 def parse_consumer_repo(repo_path: Path, repo_name: str) -> ParsedRepo:
-    """Parse a repo like service-webshop: module blocks consuming external modules."""
     parsed = ParsedRepo(repo_name=repo_name)
-    repo_entity = Entity(id=repo_name, type="repo", name=repo_name)
-    parsed.add_entity(repo_entity)
+    parsed.add_entity(Entity(id=repo_name, type="repo", name=repo_name))
 
     for tf_file in repo_path.glob("*.tf"):
         try:
@@ -93,6 +96,7 @@ def parse_consumer_repo(repo_path: Path, repo_name: str) -> ParsedRepo:
 
         for block in data.get("module", []):
             for call_name, call_body in block.items():
+                call_name = _strip_quotes(call_name)
                 source = call_body.get("source", "")
                 match = MODULE_SOURCE_RE.search(source)
                 if not match:
@@ -101,17 +105,14 @@ def parse_consumer_repo(repo_path: Path, repo_name: str) -> ParsedRepo:
 
                 module_name, ref = match.group(1), match.group(2) or "unknown"
                 call_id = f"{repo_name}:{call_name}"
-                # target_id points at the module_def id from the registry repo.
-                # Assumes the registry repo is named "infra-modules" - adjust if renamed.
                 target_module_id = f"infra-modules:{module_name}"
 
-                call_entity = Entity(
+                parsed.add_entity(Entity(
                     id=call_id,
                     type="module_call",
                     name=call_name,
                     properties={"module_name": module_name, "version": ref},
-                )
-                parsed.add_entity(call_entity)
+                ))
                 parsed.add_edge(Edge(
                     type="consumes",
                     source_id=repo_name,
@@ -123,7 +124,6 @@ def parse_consumer_repo(repo_path: Path, repo_name: str) -> ParsedRepo:
 
 
 def parse_repo(repo_path: Path) -> ParsedRepo:
-    """Auto-detect repo shape and parse accordingly."""
     repo_name = repo_path.name
     if (repo_path / "modules").exists():
         return parse_module_registry_repo(repo_path, repo_name)

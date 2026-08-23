@@ -50,7 +50,7 @@ def main():
 
     billing_vpc = next(
         ed for ed in all_parsed["service-billing"].edges
-        if ed.properties.get("call_name") == '"vpc"'
+        if ed.properties.get("call_name") == "vpc"
     )
     assert billing_vpc.properties["version"] == "v1.0.0", "expected billing on vpc-base v1.0.0"
     print(f"  [PASS] service-billing pinned to vpc-base v1.0.0 (drift confirmed)")

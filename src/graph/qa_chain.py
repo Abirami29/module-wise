@@ -1,0 +1,71 @@
+"""
+Natural-language Q&A over the Neo4j graph via GraphCypherQAChain.
+LLM translates a question into Cypher, runs it, and generates an answer
+grounded in the actual query result - not free-form generation.
+"""
+import os
+
+from dotenv import load_dotenv
+from langchain_core.prompts import PromptTemplate
+from langchain_neo4j import Neo4jGraph, GraphCypherQAChain
+
+from src.llm.nebius_client import get_llm
+
+load_dotenv()
+
+
+CUSTOM_QA_PROMPT = PromptTemplate(
+    input_variables=["context", "question"],
+    template="""You answer questions using ONLY the data provided below. This data
+comes directly from a graph database query written specifically to answer the
+question below - assume the data is already correctly scoped to the question's
+subject, even if the question's exact wording doesn't appear in the data itself.
+
+Data:
+{context}
+
+Question: {question}
+
+Instructions:
+- Trust the data completely. It was retrieved specifically to answer this question.
+- If the data is a non-empty list, describe what it shows in one or two plain sentences, directly answering the question.
+- If the data is an empty list, say plainly that no matching records were found.
+- Do NOT comment on your own reasoning process, do NOT say what you were or weren't told to do, and do NOT say a name is "not mentioned" if the data was clearly retrieved for that exact subject.
+- Just answer the question directly, in plain language, using the data.
+
+Answer:""",
+)
+
+
+def get_graph_qa_chain() -> GraphCypherQAChain:
+    graph = Neo4jGraph(
+        url=os.environ["NEO4J_URI"],
+        username=os.environ["NEO4J_USERNAME"],
+        password=os.environ["NEO4J_PASSWORD"],
+    )
+    graph.refresh_schema()
+
+    cypher_llm = get_llm(max_tokens=1024, frequency_penalty=0.4)
+    qa_llm = get_llm(max_tokens=2048, frequency_penalty=0.4)
+
+    chain = GraphCypherQAChain.from_llm(
+        cypher_llm=cypher_llm,
+        qa_llm=qa_llm,
+        graph=graph,
+        qa_prompt=CUSTOM_QA_PROMPT,
+        verbose=True,
+        allow_dangerous_requests=True,
+        return_intermediate_steps=True,
+    )
+    return chain
+
+
+def ask_graph(question: str) -> dict:
+    chain = get_graph_qa_chain()
+    result = chain.invoke({"query": question})
+    return {
+        "question": question,
+        "answer": result["result"],
+        "generated_cypher": result["intermediate_steps"][0].get("query") if result.get("intermediate_steps") else None,
+        "raw_context": result["intermediate_steps"][1].get("context") if len(result.get("intermediate_steps", [])) > 1 else None,
+    }

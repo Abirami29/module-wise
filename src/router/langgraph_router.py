@@ -11,6 +11,8 @@ from src.graph.qa_chain import ask_graph
 from src.vector.build_index import load_vector_store
 from src.llm.nebius_client import get_llm, invoke_json
 
+from src.vector.qa_chain import ask_vector
+
 CLASSIFY_PROMPT = """Classify this question about a Terraform module registry as either
 "structural" or "semantic".
 
@@ -55,16 +57,12 @@ def run_graph_path(state: RouterState) -> RouterState:
 
 
 def run_vector_path(state: RouterState) -> RouterState:
-    store = load_vector_store()
-    results = store.similarity_search(state["question"], k=3)
-    if results:
-        summary = "\n\n".join(
-            f"[{r.metadata.get('module_name', r.metadata.get('source_path'))}]\n{r.page_content[:300]}"
-            for r in results
-        )
-        answer = f"Found relevant documentation:\n\n{summary}"
-    else:
+    try:
+        result = ask_vector(state["question"], k=3)
+        answer = result["answer"]
+    except Exception as e:
         answer = ""
+        print(f"  [warn] vector path failed: {e}")
     attempted = state["attempted_paths"] + ["vector"]
     return {**state, "answer": answer, "path_used": "vector", "attempted_paths": attempted}
 

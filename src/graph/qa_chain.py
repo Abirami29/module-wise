@@ -21,12 +21,22 @@ Neo4j graph with this schema:
 
 {schema}
 
+Example - checking version consistency across consumers of the same module:
+MATCH (r:Repo)-[c:CONSUMES]->(m:ModuleDef {{name: 'MODULE_NAME'}})
+RETURN r.name AS repo, c.version AS version
+ORDER BY version
+(Do the comparison of versions in the answer, not inside the Cypher - just
+return each repo and its version, do not use aggregation functions like max()
+inside WHERE or CASE clauses.)
+
 Question: {question}
 
 IMPORTANT: Only generate a query using labels, relationship types, and properties
-that actually exist in the schema above. If the question cannot be answered using
-this schema (e.g. it asks about something not represented as a node, relationship,
-or property here), respond with exactly: MATCH (n) WHERE false RETURN n
+that actually exist in the schema above. Only use the "cannot answer" fallback
+below if the question asks about something with NO relevant nodes/properties in
+the schema at all - if relevant data exists (like module names, versions, or
+consumption relationships), always attempt a query rather than bailing out.
+If genuinely unanswerable, respond with exactly: MATCH (n) WHERE false RETURN n
 
 Generate ONLY the Cypher query, no explanation, no markdown formatting:""",
 )
@@ -83,12 +93,21 @@ def get_graph_qa_chain() -> GraphCypherQAChain:
     return chain
 
 
-def ask_graph(question: str) -> dict:
+def ask_graph(question: str, max_retries: int = 2) -> dict:
     chain = get_graph_qa_chain()
-    result = chain.invoke({"query": question})
+    for attempt in range(1, max_retries + 1):
+        result = chain.invoke({"query": question})
+        answer = result["result"]
+        if answer and answer.strip():
+            return {
+                "question": question,
+                "answer": answer,
+                "generated_cypher": result["intermediate_steps"][0].get("query") if result.get("intermediate_steps") else None,
+                "raw_context": result["intermediate_steps"][1].get("context") if len(result.get("intermediate_steps", [])) > 1 else None,
+            }
     return {
         "question": question,
-        "answer": result["result"],
-        "generated_cypher": result["intermediate_steps"][0].get("query") if result.get("intermediate_steps") else None,
-        "raw_context": result["intermediate_steps"][1].get("context") if len(result.get("intermediate_steps", [])) > 1 else None,
+        "answer": "[unable to generate an answer after retries]",
+        "generated_cypher": None,
+        "raw_context": None,
     }

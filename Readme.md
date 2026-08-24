@@ -1,4 +1,5 @@
 # Module-Wise: Your Terraform Modules Intelligence Platform
+🔗 **[Live Demo](https://module-wise-53oujbnhbdxbbivipxenoc.streamlit.app/)**
 
 ## What is Module-Wise?
 

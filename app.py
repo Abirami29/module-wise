@@ -1,5 +1,7 @@
 """
 Module-Wise: GraphRAG for Terraform module dependencies.
+Routes questions between a Neo4j knowledge graph (structural questions)
+and a Qdrant vector store (semantic questions) via a LangGraph router.
 """
 from pathlib import Path
 
@@ -27,39 +29,18 @@ with st.sidebar:
         "- *Is there a module for provisioning an S3 bucket?*\n"
         "- *Do we have a module for running containerized services?*"
     )
+    st.divider()
+    st.subheader("Admin")
+    if st.button("🔄 Rebuild Graph + Vector Index"):
+        with st.spinner("Rebuilding..."):
+            from src.graph.build_graph import build_full_graph
+            from src.vector.build_index import build_vector_store
+            build_full_graph(clear_first=True)
+            build_vector_store(clear_first=True)
+        st.success("Rebuilt from current repo state.")
 
-tab_chat, tab_repos = st.tabs(["💬 Chat", "📁 Browse Repos"])
-
-with tab_chat:
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-            if msg.get("path_used"):
-                st.caption(f"🔀 routed to: **{msg['path_used']}**")
-
-    if question := st.chat_input("Ask about the module registry..."):
-        st.session_state.messages.append({"role": "user", "content": question})
-        with st.chat_message("user"):
-            st.markdown(question)
-
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                result = ask(question)
-            st.markdown(result["answer"])
-            st.caption(f"🔀 routed to: **{result['path_used']}**" + (
-                f" (fallback from {result['attempted_paths'][0]})" if len(result["attempted_paths"]) > 1 else ""
-            ))
-
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": result["answer"],
-            "path_used": result["path_used"],
-        })
-
-with tab_repos:
+# Repo browser - collapsed by default, click to expand
+with st.expander("📁 Browse sample repos", expanded=False):
     st.subheader("Sample repos in this project")
 
     DATA_DIR = Path("data/github-repos")
@@ -102,13 +83,35 @@ with tab_repos:
                 selected_file = st.selectbox("View .tf file", file_names)
                 st.code((repo_path / selected_file).read_text(), language="hcl")
 
-with st.sidebar:
-    st.divider()
-    st.subheader("Admin")
-    if st.button("🔄 Rebuild Graph + Vector Index"):
-        with st.spinner("Rebuilding..."):
-            from src.graph.build_graph import build_full_graph
-            from src.vector.build_index import build_vector_store
-            build_full_graph(clear_first=True)
-            build_vector_store(clear_first=True)
-        st.success("Rebuilt from current repo state.")
+st.divider()
+st.subheader("💬 Chat")
+
+# Chat is at the top level of the page (not inside tabs/expander) so that
+# st.chat_input correctly pins itself to the bottom of the screen.
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+        if msg.get("path_used"):
+            st.caption(f"🔀 routed to: **{msg['path_used']}**")
+
+if question := st.chat_input("Ask about the module registry..."):
+    st.session_state.messages.append({"role": "user", "content": question})
+    with st.chat_message("user"):
+        st.markdown(question)
+
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking..."):
+            result = ask(question)
+        st.markdown(result["answer"])
+        st.caption(f"🔀 routed to: **{result['path_used']}**" + (
+            f" (fallback from {result['attempted_paths'][0]})" if len(result["attempted_paths"]) > 1 else ""
+        ))
+
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": result["answer"],
+        "path_used": result["path_used"],
+    })

@@ -14,12 +14,32 @@ from src.llm.nebius_client import get_llm
 load_dotenv()
 
 
+CUSTOM_CYPHER_PROMPT = PromptTemplate(
+    input_variables=["schema", "question"],
+    template="""You translate natural language questions into Cypher queries for a
+Neo4j graph with this schema:
+
+{schema}
+
+Question: {question}
+
+IMPORTANT: Only generate a query using labels, relationship types, and properties
+that actually exist in the schema above. If the question cannot be answered using
+this schema (e.g. it asks about something not represented as a node, relationship,
+or property here), respond with exactly: MATCH (n) WHERE false RETURN n
+
+Generate ONLY the Cypher query, no explanation, no markdown formatting:""",
+)
+
+
 CUSTOM_QA_PROMPT = PromptTemplate(
     input_variables=["context", "question"],
     template="""You answer questions using ONLY the data provided below. This data
 comes directly from a graph database query written specifically to answer the
 question below - assume the data is already correctly scoped to the question's
 subject, even if the question's exact wording doesn't appear in the data itself.
+
+IMPORTANT: Always respond in English, regardless of the language of the question or data.
 
 Data:
 {context}
@@ -45,7 +65,7 @@ def get_graph_qa_chain() -> GraphCypherQAChain:
     )
     graph.refresh_schema()
 
-    cypher_llm = get_llm(max_tokens=1024, frequency_penalty=0.4)
+    cypher_llm = get_llm(max_tokens=2048, frequency_penalty=0.4)
     qa_llm = get_llm(max_tokens=2048, frequency_penalty=0.4)
 
     chain = GraphCypherQAChain.from_llm(
@@ -53,9 +73,12 @@ def get_graph_qa_chain() -> GraphCypherQAChain:
         qa_llm=qa_llm,
         graph=graph,
         qa_prompt=CUSTOM_QA_PROMPT,
+        cypher_prompt=CUSTOM_CYPHER_PROMPT,
         verbose=True,
         allow_dangerous_requests=True,
         return_intermediate_steps=True,
+        validate_cypher=True,
+        top_k=10,
     )
     return chain
 

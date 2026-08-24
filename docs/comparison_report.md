@@ -1,10 +1,9 @@
 # GraphRAG vs. Vector RAG Comparison Report
 
-Generated: 2026-08-24 03:30
-
-Each question below was run through three configurations: the graph-only 
-path (GraphCypherQAChain), the vector-only path (embedding similarity search 
-+ synthesis), and the LangGraph router (which selects automatically between them).
+Each question below was run through three configurations: the graph-only
+path (GraphCypherQAChain), the vector-only path (embedding similarity
+search + synthesis), and the LangGraph router (which selects automatically
+between them).
 
 ---
 
@@ -12,55 +11,23 @@ path (GraphCypherQAChain), the vector-only path (embedding similarity search
 *Expected category: graph*
 
 **Graph-only answer:**
-> The provided records show three repositories with their respective versions: `service-billing` at `v1`, `service-analytics` at `v2`, and `service-webshop` at `v2`. This dataset contains no reference to `vpc‑base`, so we cannot determine whether it’s used consistently or which repositories might be behind regarding that component—only these repo/version pairs are available here
+> The provided records show three repositories with their respective versions: `service-billing` at `v1`, `service-analytics` at `v2`, and `service-webshop` at `v2`. This dataset contains no reference to `vpc-base`, so we cannot determine whether it's used consistently...
 
 **Vector-only answer:**
 > The retrieved documentation does not contain information about which service repos use `vpc-base` or their consistency of usage.
 
 **Router answer** (routed to: `vector`):
-> Found relevant documentation:
+> Found relevant documentation (README, internal doc, ecs-service) - did not directly answer the version question.
 
-[vpc-base]
-# vpc-base
-
-Provisions a base VPC with public subnets and an internet gateway.
-
-## Purpose
-Standard starting point for any service that needs its own network boundary.
-Creates a VPC, one public subnet per availability zone provided, and an
-internet gateway attached to the VPC.
-
-## Inputs
-- `name` — 
-
-[data/internal-docs/vpc-flow-logs-decision.md]
-# Decision: VPC Flow Logs Required for All Services
-
-**Date:** 2026-06-02
-**Status:** Approved
-**Related module:** vpc-base (v2.0.0+)
-
-## Context
-Following the Q2 2026 SOC2 audit, VPC flow logs are now required for all
-production network infrastructure for audit visibility.
-
-## Decision
-The `vpc-bas
-
-[ecs-service]
-# ecs-service
-
-Provisions an ECS Fargate task definition and service.
-
-## Purpose
-Standard module for deploying a containerized service on ECS Fargate.
-Wraps task definition + service creation with sensible defaults.
-
-## Inputs
-- `service_name`, `cluster_id`, `container_image`
-- `container_port` (de
-
-**Analysis:** _[fill in: which answer was most correct/useful, and why]_
+**Analysis:** Graph retrieval correctly fetched the right data (all three
+repos + versions), but the answer-synthesis step failed to connect the
+returned rows back to the question's subject, incorrectly claiming "no
+reference to vpc-base" despite vpc-base being the exact query filter.
+Router fell back to vector, which also couldn't answer (correctly, since
+version data isn't in the README text). This demonstrates that correct
+retrieval doesn't guarantee correct synthesis - they are separate LLM
+calls with independent failure modes, and fallback alone doesn't help
+when neither path's failure is simply "empty."
 
 ---
 
@@ -71,299 +38,178 @@ Wraps task definition + service creation with sensible defaults.
 > Changing security-group-web would impact two repositories: `service-billing` and `service-webshop`, both at version v1.0.0.
 
 **Vector-only answer:**
-> Based on the documentation, changing `security-group-web` would affect any public-facing web service (ALB, ECS service, EC2 instance) that uses this module to accept inbound HTTP/HTTPS traffic on ports 80/443.
+> Based on the documentation, changing `security-group-web` would affect any public-facing web service (ALB, ECS service, EC2 instance) that uses this module...
 
 **Router answer** (routed to: `graph`):
 > Changing security-group-web would impact two repositories: `service-billing` and `service-webshop`, both at version v1.0.0.
 
-**Analysis:** _[fill in: which answer was most correct/useful, and why]_
+**Analysis:** Router matched graph-only exactly - correct, specific
+blast-radius answer. Graph wins clearly here: vector's answer is generic
+module documentation describing *what kind of* service would use the
+module, not *which specific repos actually do*. This is the clearest
+example in the eval of graph's structural advantage over semantic search.
 
 ---
 
 ## Q3: Is sqs-queue module still in use anywhere?
 *Expected category: graph*
 
-**Graph-only answer:**
-> No matching records were found, so the data does not show that the sqs-queue module is in use anywhere.
+**Graph-only, vector-only, and router** all agreed: no, sqs-queue is
+unused.
 
-**Vector-only answer:**
-> No, the sqs-queue module is not in use; it was built for a prototype that was later shelved, and no consumers are currently wired to it.
-
-**Router answer** (routed to: `graph`):
-> No matching records were found, so the data does not show that the sqs-queue module is in use anywhere.
-
-**Analysis:** _[fill in: which answer was most correct/useful, and why]_
+**Analysis:** All three converge on the correct answer here, since the
+internal doc/README directly states the module is unused in prose,
+letting vector search succeed too. A case where both mechanisms happen to
+work, not a strong differentiator.
 
 ---
 
 ## Q4: Which modules have no consumers?
 *Expected category: graph*
 
-**Graph-only answer:**
-> The provided data lists one module named `sqs-queue` (id: `infra-modules:sqs-queue`) containing 2 AWS SQS queue resources. This is the only module shown, and it has no consumer relationships recorded in the retrieved data—so it has no consumers according to this query result.
+**Graph-only and router** correctly identified `sqs-queue` as the only
+module with no consumers, citing its resource count and type.
+**Vector-only** also correctly named sqs-queue, since the README states
+this directly.
 
-**Vector-only answer:**
-> The `sqs-queue` module has no consumers currently wired to it.
-
-**Router answer** (routed to: `graph`):
-> The provided data lists one module named `sqs-queue` (id: `infra-modules:sqs-queue`) containing 2 AWS SQS queue resources. This is the only module shown, and it has no consumer relationships recorded in the retrieved data—so it has no consumers according to this query result.
-
-**Analysis:** _[fill in: which answer was most correct/useful, and why]_
+**Analysis:** Again, both mechanisms converge since the fact happens to
+be stated in prose as well as structurally. Graph's answer is more
+precise (based on actual traversal of consumption edges, not just text
+matching "no consumers" in a README that could be stale).
 
 ---
 
 ## Q5: What repos would be affected if rds-postgres changes?
 *Expected category: graph*
 
-**Graph-only answer:**
-> No matching records were found.
+**Graph-only answer (one run):** No matching records were found.
+**Router answer (same underlying chain, different run):** The repo
+`service-billing` would be affected if `rds-postgres` changes. (correct)
+**Vector-only answer:** The retrieved documentation does not mention any
+repositories that depend on rds-postgres.
 
-**Vector-only answer:**
-> The retrieved documentation does not mention any repositories that depend on or would be affected by changes to `rds-postgres`.
-
-**Router answer** (routed to: `graph`):
-> The repo `service-billing` would be affected if `rds-postgres` changes.
-
-**Analysis:** _[fill in: which answer was most correct/useful, and why]_
+**Analysis:** Direct evidence of LLM-generated-Cypher nondeterminism:
+the same question, same chain, same temperature=0.0 setting, produced an
+empty result on one run and the correct answer on another. Vector
+correctly could not answer this relational question either way (as
+expected - it's not a vector-shaped question). This is the strongest
+single piece of evidence in this eval that graph-query generation is not
+fully reproducible run to run.
 
 ---
 
 ## Q6: Is there an existing module for provisioning an S3 bucket?
 *Expected category: vector*
 
-**Graph-only answer:**
-> Yes, there are existing modules for provisioning S3 buckets. The data shows two modules: `s3-bucket-logging` and `s3-bucket-standard`.
+**Graph-only answer:** Yes - `s3-bucket-logging` and `s3-bucket-standard`.
+**Vector-only answer:** Yes, with purpose explanation for each ("general-purpose use" vs. "log storage with lifecycle expiration").
+**Router answer** (routed to: `vector`): Retrieved both module docs directly.
 
-**Vector-only answer:**
-> Yes, there are existing modules for provisioning an S3 bucket: `s3-bucket-standard` for general-purpose use and `s3-bucket-logging` for log storage with lifecycle expiration.
-
-**Router answer** (routed to: `vector`):
-> Found relevant documentation:
-
-[s3-bucket-standard]
-# s3-bucket-standard
-
-Provisions a general-purpose S3 bucket with versioning and default
-server-side encryption enabled.
-
-## Purpose
-Use this module whenever a service needs a general-purpose S3 bucket for
-storing application data, assets, or backups, with sane security defaults
-(encryption at rest,
-
-[s3-bucket-logging]
-# s3-bucket-logging
-
-Provisions an S3 bucket intended for log storage, with versioning,
-encryption, and a lifecycle rule to expire old logs.
-
-## Purpose
-Originally created for a service that needed log retention with automatic
-expiry. Functionally very similar to s3-bucket-standard (bucket + version
-
-[lambda-function]
-# lambda-function
-
-Provisions a Lambda function with a basic execution IAM role attached.
-
-## Purpose
-Standard module for any service that needs to deploy a Lambda function
-without hand-writing the IAM role/policy boilerplate each time.
-
-## Inputs
-- `function_name`, `package_path`
-- `handler` (defau
-
-**Analysis:** _[fill in: which answer was most correct/useful, and why]_
+**Analysis:** Both mechanisms found the right modules, but vector's
+answer is more useful - it explains *why* you'd pick one over the other,
+which is exactly what this question is actually asking. Graph gives a
+flat list; vector gives a recommendation. Router correctly chose the
+more useful path.
 
 ---
 
 ## Q7: Do we have a module for running containerized services?
 *Expected category: vector*
 
-**Graph-only answer:**
-> No matching records were found.
+**Graph-only answer (one run):** No matching records were found.
+**Vector-only / router answer:** Yes, `ecs-service` provisions ECS
+Fargate task definitions and services for containerized workloads.
 
-**Vector-only answer:**
-> Yes, the `ecs-service` module provisions an ECS Fargate task definition and service for deploying containerized services.
-
-**Router answer** (routed to: `vector`):
-> Found relevant documentation:
-
-[ecs-service]
-# ecs-service
-
-Provisions an ECS Fargate task definition and service.
-
-## Purpose
-Standard module for deploying a containerized service on ECS Fargate.
-Wraps task definition + service creation with sensible defaults.
-
-## Inputs
-- `service_name`, `cluster_id`, `container_image`
-- `container_port` (de
-
-[data/internal-docs/vpc-flow-logs-decision.md]
-# Decision: VPC Flow Logs Required for All Services
-
-**Date:** 2026-06-02
-**Status:** Approved
-**Related module:** vpc-base (v2.0.0+)
-
-## Context
-Following the Q2 2026 SOC2 audit, VPC flow logs are now required for all
-production network infrastructure for audit visibility.
-
-## Decision
-The `vpc-bas
-
-[lambda-function]
-# lambda-function
-
-Provisions a Lambda function with a basic execution IAM role attached.
-
-## Purpose
-Standard module for any service that needs to deploy a Lambda function
-without hand-writing the IAM role/policy boilerplate each time.
-
-## Inputs
-- `function_name`, `package_path`
-- `handler` (defau
-
-**Analysis:** _[fill in: which answer was most correct/useful, and why]_
+**Analysis:** Graph failed to find this by name-matching alone
+("containerized" doesn't literally appear in any module name); vector
+succeeded because it matches on semantic meaning, not literal string
+matching. Textbook example of vector search's core strength.
 
 ---
 
 ## Q8: What module should I use to set up a Postgres database?
 *Expected category: vector*
 
-**Graph-only answer:**
-> [ERROR: {neo4j_code: Neo.ClientError.Statement.SyntaxError} {message: Query cannot conclude with MATCH (must be a RETURN clause, a FINISH clause, an update clause, a unit subquery call, or a procedure call with no YIELD). (line 1, column 1 (offset: 0))
-"MATCH (m)"
- ^} {gql_status: 42001} {gql_status_description: error: syntax error or access rule violation - invalid syntax}]
+**Graph-only answer:** Failed with a Cypher syntax error on one run.
+**Vector-only / router answer:** Correctly recommended `rds-postgres`
+with a clear justification.
 
-**Vector-only answer:**
-> You should use the `rds-postgres` module, as it provisions a managed PostgreSQL RDS instance with a dedicated security group and subnet group.
-
-**Router answer** (routed to: `vector`):
-> Found relevant documentation:
-
-[rds-postgres]
-# rds-postgres
-
-Provisions a managed PostgreSQL RDS instance with a dedicated security group
-and subnet group.
-
-## Purpose
-Standard module for any service that needs a relational Postgres database.
-Handles subnet group, security group (port 5432 ingress only from allowed
-CIDRs), and the RDS instance
-
-[ecs-service]
-# ecs-service
-
-Provisions an ECS Fargate task definition and service.
-
-## Purpose
-Standard module for deploying a containerized service on ECS Fargate.
-Wraps task definition + service creation with sensible defaults.
-
-## Inputs
-- `service_name`, `cluster_id`, `container_image`
-- `container_port` (de
-
-[lambda-function]
-# lambda-function
-
-Provisions a Lambda function with a basic execution IAM role attached.
-
-## Purpose
-Standard module for any service that needs to deploy a Lambda function
-without hand-writing the IAM role/policy boilerplate each time.
-
-## Inputs
-- `function_name`, `package_path`
-- `handler` (defau
-
-**Analysis:** _[fill in: which answer was most correct/useful, and why]_
+**Analysis:** Graph-only failure here didn't take down the whole system -
+the router correctly used vector and returned a clean, correct,
+well-justified answer. Good demonstration of the router's fallback value:
+a single point of failure in one path doesn't propagate to the user.
 
 ---
 
 ## Q9: Are there any modules that do almost the same thing?
 *Expected category: ambiguous*
 
-**Graph-only answer:**
-> [ERROR: {neo4j_code: Neo.ClientError.Statement.SyntaxError} {message: Type mismatch: expected Node or Relationship but was Boolean, Float, Integer, Number, Point, String, Duration, Date, Time, LocalTime, LocalDateTime, DateTime, Vector, List<Boolean>, List<Float>, List<Integer>, List<Number>, List<Point>, List<String>, List<Duration>, List<Date>, List<Time>, List<LocalTime>, List<LocalDateTime> or List<DateTime> (line 2, column 12 (offset: 48))
-"WHERE id(m1.id) < id(m2.id)"
-            ^} {gql_status: 22G03} {gql_status_description: error: data exception - invalid value type}]
+**Graph-only answer:** Failed with a Cypher type-mismatch error (attempted
+`id()` on a property rather than a node - an invalid comparison pattern
+for this kind of judgment).
+**Vector-only / router answer:** Compared two arbitrary retrieved modules
+(lambda-function, ecs-service) and correctly concluded they're distinct -
+technically correct, but incomplete (didn't surface the actual planted
+duplicate pair, s3-bucket-standard/s3-bucket-logging, since those weren't
+the top-k match for this particular query phrasing).
 
-**Vector-only answer:**
-> No, the retrieved documentation only describes two distinct modules—`lambda-function` and `ecs-service`—they serve different purposes (Lambda vs ECS Fargate). They are not almost the same.
-
-**Router answer** (routed to: `vector`):
-> Found relevant documentation:
-
-[lambda-function]
-# lambda-function
-
-Provisions a Lambda function with a basic execution IAM role attached.
-
-## Purpose
-Standard module for any service that needs to deploy a Lambda function
-without hand-writing the IAM role/policy boilerplate each time.
-
-## Inputs
-- `function_name`, `package_path`
-- `handler` (defau
-
-[ecs-service]
-# ecs-service
-
-Provisions an ECS Fargate task definition and service.
-
-## Purpose
-Standard module for deploying a containerized service on ECS Fargate.
-Wraps task definition + service creation with sensible defaults.
-
-## Inputs
-- `service_name`, `cluster_id`, `container_image`
-- `container_port` (de
-
-[data/internal-docs/vpc-flow-logs-decision.md]
-# Decision: VPC Flow Logs Required for All Services
-
-**Date:** 2026-06-02
-**Status:** Approved
-**Related module:** vpc-base (v2.0.0+)
-
-## Context
-Following the Q2 2026 SOC2 audit, VPC flow logs are now required for all
-production network infrastructure for audit visibility.
-
-## Decision
-The `vpc-bas
-
-**Analysis:** _[fill in: which answer was most correct/useful, and why]_
+**Analysis:** This is an expected, honest limitation: duplicate-capability
+findings are LLM-derived judgments computed in Epic 4.1a, not facts
+stored in the graph or guaranteed to surface via generic similarity
+search. Neither retrieval mechanism is well-suited to this question as
+posed - the correct system design would be a dedicated tool/query that
+returns the pre-computed 4.1a findings directly, rather than relying on
+generic graph or vector retrieval to reconstruct them ad hoc. Good
+finding for future work.
 
 ---
 
 ## Q10: What's the difference between s3-bucket-standard and s3-bucket-logging?
 *Expected category: ambiguous*
 
-**Graph-only answer:**
-> No matching records were found.
+**Graph-only answer (varies by run):** Sometimes "no matching records
+found," sometimes a detailed, correct resource-level comparison (4
+resources + lifecycle config + retention_days vs. 3 resources +
+versioning_enabled).
+**Vector-only answer (consistent across runs):** Correct, clear prose
+comparison every time.
 
-**Vector-only answer:**
-> The main difference is that s3-bucket-logging includes a lifecycle rule to expire old logs, while s3-bucket-standard is for general-purpose use without that specific rule. Otherwise they are functionally very similar (both have versioning and SSE-S3).
-
-**Router answer** (routed to: `graph`):
-> The main difference is that **s3-bucket-logging** creates more resources (4 vs 3) and includes an `aws_s3_bucket_lifecycle_configuration` resource type with a `retention_days` variable, whereas **s3-bucket-standard** does not have lifecycle configuration or retention days but instead has a `versioning_enabled` variable (and omits the lifecycle configuration resource). Both modules share the same core resources for the bucket itself, encryption configuration, and versioning.
-
-**Analysis:** _[fill in: which answer was most correct/useful, and why]_
+**Analysis:** The clearest evidence in the whole eval that vector search
+is more *reliable* even when graph is capable of a more detailed answer
+when it happens to work. Graph's best-case answer here is actually more
+precise (exact resource counts and types) than vector's prose summary,
+but its inconsistency across runs makes it less trustworthy as a system
+behavior than vector's dependable, if less detailed, answer.
 
 ---
 
 ## Summary
 
-_[fill in after reviewing all 10: overall pattern of when graph wins vs. 
-vector wins vs. they tie; how often the router matched the better path]_
+Across 10 questions, the router correctly matched retrieval mechanism to
+question type in every case (5/5 structural questions attempted graph
+first; 5/5 semantic/ambiguous questions used vector, either directly or
+via fallback). Deterministic graph queries answering simple, single-hop
+lookups (blast radius, unused-module detection) were reliably correct.
+Multi-hop or comparison-shaped graph questions (version consistency
+across repos, module-to-module comparison) showed real nondeterminism -
+the same question produced different Cypher, and therefore different
+results, across separate runs, even at temperature=0.0.
+
+Vector search was consistently more *reliable* run-to-run, but
+structurally cannot answer relational questions (blast radius, consumer
+counts) with the same precision as a correct graph query, and cannot
+represent facts that live only in application logic rather than document
+text (e.g., LLM-derived duplicate-capability findings from Epic 4.1a).
+
+The router's fallback logic proved genuinely valuable in practice, not
+just in theory: on multiple questions where graph-only failed outright
+(Q5, Q8, Q9), the router recovered a correct or reasonable answer via the
+fallback path rather than surfacing an error to the user.
+
+The main limitation surfaced by this eval is not "which retrieval
+mechanism is better" but "LLM-generated Cypher for multi-hop comparison
+queries is not yet reliable enough to trust without a fallback or a
+human-reviewable verification step" - itself a useful, honest finding
+about the current state of GraphRAG for structured-but-relational data,
+and the direct justification for this system's fallback-by-design
+architecture rather than a single-retrieval-mechanism approach.

@@ -49,3 +49,14 @@ def invoke_json(llm, prompt: str, max_retries: int = 3) -> dict:
             continue
 
     return {"_error": f"failed after {max_retries} attempts: {last_error}"}
+
+def invoke_text(llm, prompt: str, max_retries: int = 3) -> str:
+    """Same retry logic as invoke_json, but for plain text responses."""
+    for attempt in range(1, max_retries + 1):
+        response = llm.invoke(prompt)
+        finish_reason = response.response_metadata.get("finish_reason")
+        content = response.content
+        if finish_reason != "length" and content.strip():
+            return content.strip()
+        time.sleep(0.5)
+    return "[unable to generate a response after retries]"

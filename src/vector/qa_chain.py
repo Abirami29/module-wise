@@ -33,7 +33,7 @@ def ask_vector(question: str, k: int = 3) -> dict:
         for r in results
     )
 
-    llm = get_llm(max_tokens=1024, frequency_penalty=0.4)
+    llm = get_llm(max_tokens=1536, frequency_penalty=0.4)
     # response = llm.invoke(VECTOR_QA_PROMPT.format(context=context, question=question))
 
     answer = invoke_text(llm, VECTOR_QA_PROMPT.format(context=context, question=question))

@@ -4,7 +4,9 @@ LLM translates a question into Cypher, runs it, and generates an answer
 grounded in the actual query result - not free-form generation.
 """
 import os
+import re
 
+from src.graph.queries import find_unused_modules, find_version_drift, find_consumers_of
 from dotenv import load_dotenv
 from langchain_core.prompts import PromptTemplate
 from langchain_neo4j import Neo4jGraph, GraphCypherQAChain
@@ -92,8 +94,48 @@ def get_graph_qa_chain() -> GraphCypherQAChain:
     )
     return chain
 
+def _try_deterministic_match(question: str) -> str | None:
+    q = question.lower()
+
+    m = re.search(r"(?:blast radius|affected|impact).*?(?:if|change|changing)\s+([a-z0-9\-]+)", q)
+    if not m:
+        m = re.search(r"repos? (?:would be |are )?affected.*?(?:if|by)\s+([a-z0-9\-]+)", q)
+    if m:
+        module_name = m.group(1).strip()
+        consumers = find_consumers_of(module_name)
+        if not consumers:
+            return f"No repos currently consume '{module_name}' (based on graph data)."
+        # repos = ", ".join(f"{c['repo_id']} (v{c['version']})" for c in consumers)
+        repos = ", ".join(f"{c['repo_id']} ({c['version']})" for c in consumers)
+        return f"Changing '{module_name}' would affect: {repos}."
+
+    if "unused" in q or "no consumer" in q or ("used" in q and "anywhere" in q) or "still in use" in q:
+        unused = find_unused_modules()
+        if not unused:
+            return "All modules currently have at least one consumer."
+        return f"The following module(s) have no consumers: {', '.join(u['module_name'] for u in unused)}."
+
+    if "consisten" in q or "drift" in q or "behind" in q:
+        drift = find_version_drift()
+        if not drift:
+            return "All modules are consumed at consistent versions across repos."
+        lines = [f"{d['module_name']}: " + "; ".join(f"{u['repo']} on {u['version']}" for u in d["usages"]) for d in drift]
+        return "Version inconsistencies found - " + " | ".join(lines)
+
+    return None
 
 def ask_graph(question: str, max_retries: int = 2) -> dict:
+    deterministic_answer = _try_deterministic_match(question)
+    if deterministic_answer:
+        return {
+            "question": question,
+            "answer": deterministic_answer,
+            "generated_cypher": "[deterministic - no LLM Cypher used]",
+            "raw_context": None,
+        }
+    return _ask_graph_llm(question, max_retries=max_retries)
+
+def _ask_graph_llm(question: str, max_retries: int = 2) -> dict:
     chain = get_graph_qa_chain()
     for attempt in range(1, max_retries + 1):
         result = chain.invoke({"query": question})
